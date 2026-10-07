@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+.next/
+
+# Assessment dataset stays local - never committed
+data/*
+!data/.gitkeep
