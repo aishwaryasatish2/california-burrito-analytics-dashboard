@@ -33,12 +33,37 @@ The design decisions, and the measurements behind them, are recorded in
 - **When are orders concentrated?** Orders by hour of day.
 - **Which items matter most?** The top 10 items by gross revenue, with units and orders.
 
+**Ask About Your Data** is a fixed list of six questions, not a chatbot: there
+is no text input and no AI. Selecting a question shows a small result table.
+
+1. Which outlet earns the most gross revenue?
+2. Which outlet has the highest average order value?
+3. Which menu group earns the most gross revenue?
+4. Which order type is the most common?
+5. When are orders busiest? (the three busiest hours)
+6. How are delivery orders settled?
+
+The answers are calculated in the browser from the `/api/dashboard` response
+that is already on screen, so they follow the current filters and make no extra
+API calls.
+
+**Insights & Opportunities** sits beside it and lists observations for the
+selected question: shares of the total, the gap between the top item and the
+next or lowest one, and ranks. These are comparisons within the current
+selection. They show where the numbers differ, not why, and they do not suggest
+causes or actions.
+
 **Filters:** date range, outlet, menu group, order type and settlement. All
 except the dates are multi-select. Filters are kept in the URL, so a view can
 be bookmarked or shared.
 
 When a menu group filter is active, a note explains the change of scope: the
 metrics then cover only the matching lines, not whole bills.
+
+**Theme:** green for all chart data, red as a restrained accent (the rule above
+the KPIs and the selected question), sand for the filter bar and the insights
+panel, black text on a white page. No gradients. Text and control borders were
+checked against WCAG contrast minimums (details in `docs/decisions.md`).
 
 ## Architecture
 
@@ -55,7 +80,7 @@ etl/        load.py (read, transform, load, reconcile), validation.py, sql/, tes
 backend/    app/main.py (HTTP), service.py (calculations), queries.py (SQL),
             schemas.py, db.py (connection pool); tests/; scripts/ (benchmarks)
 frontend/   app/, components/ (one per dashboard section), lib/ (API client,
-            filters/URL state, formatting); tests/ui_check.py
+            filters/URL state, formatting, questions); tests/ui_check.py
 docs/       decisions.md, phase2-report.md
 ```
 
@@ -154,6 +179,8 @@ Final API response times (median of 15 requests, two runs):
 - **Partial periods:** the first and last weeks are partial and are marked as such. There is no monthly chart, because June 2025 and June 2026 are both half-months.
 - **Group-filter scope:** with a menu group filter, AOV is the average spend on that group per order, not the full basket value.
 - **Branding:** the dashboard is labelled "California Burrito" for the assessment. The dataset's own Brand value is "Burger Town".
+- **Questions and insights:** only the six fixed questions are supported, and they use the data already loaded for the current filters. Insights are comparisons, not explanations of causes, and they make no recommendations.
+- **Colours:** the palette is an interpretation of red, green, sand, white and black, not official California Burrito brand values.
 - **After re-running the ETL:** restart the API, because filter options are loaded at startup.
 
 ## Running locally
@@ -196,12 +223,13 @@ cd frontend && npm install && npm run dev
 |---|---|---|
 | ETL validation and loading | `TEST_DATABASE_URL=... python -m pytest` (repository root) | 27 passed |
 | API vs. source data | `python -m pytest` (in `backend/`) | 39 passed |
-| Browser checks | `python tests/ui_check.py` (in `frontend/`) | 54 passed |
+| Browser checks | `python tests/ui_check.py` (in `frontend/`) | 86 passed |
 
 - **API tests:** they recompute the expected values with pandas directly from the Excel file, with no ETL code and no SQL, so the database is never used to check itself. As a check on the tests themselves, deliberately breaking AOV, the end-date boundary and the group filter made 8, 7 and 6 tests fail.
 - **Browser checks:**
   - they compare every on-screen KPI with the API;
-  - they also cover the filters, URL state, Reset, date boundaries, the empty, loading and error states, keyboard use, and layouts at 1280, 820 and 390 px.
+  - they check each Ask About Your Data result, and the main figures in its insights, against values recomputed in Python from the raw API response;
+  - they also cover the filters, URL state, Reset, date boundaries, the empty, loading and error states, keyboard use, the theme colours, and layouts at 1280, 820 and 390 px.
 - **Requirements for each suite:**
   - the two ETL database tests need `TEST_DATABASE_URL` set (they are skipped otherwise);
   - the API tests need `DATABASE_URL` pointing at a database loaded by the ETL, and also need `data/data.xlsx`;

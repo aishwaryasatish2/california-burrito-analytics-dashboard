@@ -8,6 +8,7 @@ import { dateRangeError, readFilters, sanitizeFilters, toQueryString } from "@/l
 import { formatCount, formatLongDate, formatRupeesPrecise } from "@/lib/format";
 import FilterBar from "./FilterBar";
 import KpiStrip from "./KpiStrip";
+import AskAboutData from "./AskAboutData";
 import TrendChart from "./TrendChart";
 import RankedBars from "./RankedBars";
 import OrderTypePanel from "./OrderTypePanel";
@@ -204,6 +205,8 @@ function DashboardBody({ data, filters, options, onChange, onReset }) {
           total={kpis.gross_revenue}
         />
       </div>
+
+      <AskAboutData data={data} />
 
       <div className="grid-2">
         <OrderTypePanel orderTypes={data.by_order_type} channels={data.channels} />

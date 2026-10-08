@@ -72,6 +72,49 @@ def kpis_match_api(page, api, label):
     return expected
 
 
+ASK_QUESTIONS = [
+    "Which outlet earns the most gross revenue?",
+    "Which outlet has the highest average order value?",
+    "Which menu group earns the most gross revenue?",
+    "Which order type is the most common?",
+    "When are orders busiest?",
+    "How are delivery orders settled?",
+]
+AGGREGATORS = ("SwiggyPay", "ZomatoPay")
+
+
+def ask_section(page):
+    return page.locator("section[aria-labelledby=ask-title]")
+
+
+def insights_text(page):
+    return page.locator("section[aria-labelledby=insights-title]").inner_text()
+
+
+def ask_rows(page):
+    return [[c.inner_text().strip() for c in tr.locator("th, td").all()]
+            for tr in ask_section(page).locator("tbody tr").all()]
+
+
+def hour_label(hour):
+    return f"{hour:02d}:00\u2013{(hour + 1) % 24:02d}:00"
+
+
+def expected_ask_rows(d):
+    """Expected (label, value) rows for each question, computed from the raw API
+    response in plain Python (independent of the JavaScript under test)."""
+    busiest = sorted(d["hourly"], key=lambda r: (-r["orders"], r["hour"]))[:3]
+    delivery = sorted([c for c in d["channels"] if c["order_type"] == "Delivery"], key=lambda r: -r["orders"])
+    return [
+        [(r["outlet"], r["revenue"]) for r in d["by_outlet"]],
+        [(r["outlet"], r["aov"]) for r in sorted(d["by_outlet"], key=lambda r: -r["aov"]) if r["aov"] is not None],
+        [(r["group"], r["revenue"]) for r in d["by_group"]],
+        [(r["order_type"], r["orders"]) for r in sorted(d["by_order_type"], key=lambda r: -r["orders"])],
+        [(hour_label(r["hour"]), r["orders"]) for r in busiest],
+        [(r["settlement"], r["orders"]) for r in delivery],
+    ]
+
+
 def choose(page, filter_label, option):
     # Plain substring match: a "/" in a label breaks Playwright's regex serialisation.
     page.get_by_role("button", name=filter_label).click()
@@ -264,6 +307,101 @@ def main():
         page.wait_for_selector(".notice-error", state="detached")
         kpis_match_api(page, api, "Recovered after retry")
 
+        # Ask About Your Data: fixed questions, results checked against the API
+        page.goto(app)
+        wait_for_dashboard(page)
+        d = api_json(api, "")
+        expected_rows = expected_ask_rows(d)
+        check("Ask: both panels are present",
+              ask_section(page).locator("h2").inner_text() == "Ask About Your Data"
+              and page.locator("section[aria-labelledby=insights-title] h2").inner_text() == "Insights & Opportunities")
+        labels = [l.inner_text().strip() for l in ask_section(page).locator(".question").all()]
+        check("Ask: exactly the six fixed questions are offered", labels == ASK_QUESTIONS, str(labels))
+        check("Ask: not a chat box (no free-text input anywhere in the section)",
+              ask_section(page).locator("textarea, input[type=text], input[type=search]").count() == 0)
+        check("Page has no images", page.locator("img").count() == 0)
+        check("First question is selected by default",
+              page.get_by_role("radio", name=ASK_QUESTIONS[0]).is_checked())
+        for i, label in enumerate(ASK_QUESTIONS):
+            page.get_by_role("radio", name=label).check()
+            expect(ask_section(page).locator(".answer-title")).to_have_text(label)
+            got = [(r[0], number(r[1])) for r in ask_rows(page)]
+            want = [(name, float(value)) for name, value in expected_rows[i]]
+            check(f"Ask: result for '{label}' equals the API data", got == want, f"{got} vs {want}")
+            text = insights_text(page)
+            check(f"Ask: no NaN/undefined in the insights for '{label}'",
+                  not any(bad in text for bad in ("NaN", "undefined", "Infinity", "null")))
+        if shots:
+            page.get_by_role("radio", name=ASK_QUESTIONS[0]).check()
+            ask_section(page).scroll_into_view_if_needed()
+            page.screenshot(path=str(shots / "ask-desktop.png"))
+
+        # Insights are computed from the same data (independent calculation here)
+        total, orders = d["kpis"]["gross_revenue"], d["kpis"]["orders"]
+        page.get_by_role("radio", name=ASK_QUESTIONS[0]).check()
+        top, second = d["by_outlet"][0], d["by_outlet"][1]
+        text = insights_text(page)
+        check("Insights (outlet revenue): top outlet, its share and the gap to the next outlet",
+              top["outlet"] in text and f"{100 * top['revenue'] / total:.1f}%" in text
+              and f"ahead of {second['outlet']}" in text, text)
+        page.get_by_role("radio", name=ASK_QUESTIONS[4]).check()
+        peak = max(d["hourly"], key=lambda r: (r["orders"], -r["hour"]))
+        text = insights_text(page)
+        check("Insights (busiest hours): peak hour and its share of orders",
+              hour_label(peak["hour"]) in text and f"{100 * peak['orders'] / orders:.1f}%" in text, text)
+        page.get_by_role("radio", name=ASK_QUESTIONS[5]).check()
+        delivery = [c for c in d["channels"] if c["order_type"] == "Delivery"]
+        agg_share = 100 * sum(c["orders"] for c in delivery if c["settlement"] in AGGREGATORS) / sum(c["orders"] for c in delivery)
+        text = insights_text(page)
+        check("Insights (delivery): aggregator share of delivery orders",
+              f"{agg_share:.1f}%" in text and "cannot be split further" in text, text)
+
+        # Answers follow the filters, and degrade to plain messages
+        page.goto(f"{app}/?outlet=Koramangala")
+        wait_for_dashboard(page)
+        rows = ask_rows(page)
+        check("Ask with one outlet: one row, and the insight says there is nothing to compare",
+              len(rows) == 1 and rows[0][0] == "Koramangala" and "nothing to compare" in insights_text(page))
+        page.goto(f"{app}/?order_type=Dine-In")
+        wait_for_dashboard(page)
+        page.get_by_role("radio", name=ASK_QUESTIONS[5]).check()
+        check("Ask with Dine-In only: delivery question explains there is no data",
+              "no delivery orders" in ask_section(page).inner_text()
+              and "no result to interpret" in insights_text(page))
+        page.goto(f"{app}/?group=Drinks")
+        wait_for_dashboard(page)
+        page.get_by_role("radio", name=ASK_QUESTIONS[1]).check()
+        check("Ask with a group filter: AOV answer states the narrower scope",
+              "menu group filter is active" in insights_text(page))
+        page.goto(f"{app}/?order_type=Delivery&settlement=Dineout")
+        wait_for_dashboard(page)
+        check("Ask section is hidden when no data matches", page.get_by_text("Ask About Your Data").count() == 0)
+
+        # Keyboard: arrow keys move between questions
+        page.goto(app)
+        wait_for_dashboard(page)
+        page.get_by_role("radio", name=ASK_QUESTIONS[0]).focus()
+        page.keyboard.press("ArrowDown")
+        expect(ask_section(page).locator(".answer-title")).to_have_text(ASK_QUESTIONS[1])
+        check("Keyboard: ArrowDown selects the next question", page.get_by_role("radio", name=ASK_QUESTIONS[1]).is_checked())
+
+        # Theme: red accent, green data, sand bands; no gradients
+        theme = page.evaluate("""() => {
+            const css = (sel, prop) => getComputedStyle(document.querySelector(sel))[prop];
+            const gradient = [...document.styleSheets].some((sheet) =>
+                [...sheet.cssRules].some((rule) => rule.cssText.includes("gradient")));
+            return {
+                kpiRule: css(".kpi-strip", "borderTopColor"),
+                filterBand: css(".filter-bar", "backgroundColor"),
+                barFill: document.querySelector('section[aria-label="Gross revenue by outlet"] .recharts-bar-rectangle path, section[aria-label="Gross revenue by outlet"] .recharts-bar-rectangle rect')?.getAttribute("fill"),
+                gradient,
+            };
+        }""")
+        check("Theme: red rule above the KPIs", theme["kpiRule"] == "rgb(179, 38, 30)", str(theme))
+        check("Theme: sand filter band", theme["filterBand"] == "rgb(244, 236, 221)", str(theme))
+        check("Theme: green chart bars", (theme["barFill"] or "").upper() == "#2F6B3C", str(theme))
+        check("Theme: no gradients in the stylesheet", theme["gradient"] is False)
+
         # /api/filters failure has its own message and retry
         page.route("**/api/filters*", lambda route: route.abort())
         page.goto(app)
@@ -301,6 +439,13 @@ def main():
             wait_for_dashboard(small)
             overflow = small.evaluate("document.documentElement.scrollWidth - window.innerWidth")
             check(f"{name}: no horizontal page overflow", overflow <= 0, f"{overflow}px")
+            ask_box = small.locator("section[aria-labelledby=ask-title]").bounding_box()
+            ins_box = small.locator("section[aria-labelledby=insights-title]").bounding_box()
+            if width <= 1000:
+                ok = ins_box["y"] >= ask_box["y"] + ask_box["height"] - 1
+            else:
+                ok = abs(ins_box["y"] - ask_box["y"]) < 5 and ins_box["x"] >= ask_box["x"] + ask_box["width"] - 1
+            check(f"{name}: Ask / Insights panels {'stack' if width <= 1000 else 'sit side by side'}", ok)
             offscreen = []
             for label in ["Outlet", "Menu group", "Order type", "Channel / settlement"]:
                 small.get_by_role("button", name=label).click()

@@ -226,32 +226,65 @@ measured locally (PostgreSQL 16, 1-CPU sandbox); details are in
 - **Why not:** each request costs real database time (up to ~490 ms).
 - **Evidence:** a browser test makes three rapid selections and sees one request carrying all three.
 
+### 30. "Ask About Your Data": six fixed questions, answered in the browser from the dashboard response
+- **Reason:** requested as a small question-based feature, not a chatbot. All six questions can be answered from fields `/api/dashboard` already returns, so no backend change or extra request is needed.
+- **Alternatives:**
+  - a free-text or chat interface;
+  - a new API endpoint per question.
+- **Why not:**
+  - free text would invite questions the data cannot answer (customers, profit, causes), against the scope rule in entry 14;
+  - new endpoints would change the measured, tested backend for numbers the response already holds.
+- **Evidence:**
+  - browser checks recompute each question's expected rows in Python from the raw API response and compare them with the displayed table, for all six questions;
+  - a check confirms the section has no text input;
+  - edge cases are tested: one outlet, Dine-In only (no delivery orders), a menu group filter, and no matching data (the section is hidden).
+
+### 31. Insights & Opportunities show gaps in the data, not causes or recommendations
+- **Reason:** the data supports shares, gaps and ranks. It cannot show why numbers differ or what would improve them: there are no costs, customers or experiments.
+- **Alternatives:**
+  - advice-style text with suggested actions or explanations;
+  - generated summaries.
+- **Why not:** the fields do not support them, and the project's rule is not to invent conclusions.
+- **Evidence:**
+  - every statement is a calculation on the displayed result: share of total, gap to the next or lowest item, rank, aggregator share of delivery orders;
+  - small gaps are reported as small: the highest outlet AOV is ₹7.41 (1.2%) above the lowest, and the panel states exactly that;
+  - the panel says "They show where the numbers differ, not why";
+  - browser checks verify the figures in three of the insights against an independent calculation.
+
 ## Judgment calls (not measured)
 
-### 30. Dashboard labelled "California Burrito"
+### 32. Dashboard labelled "California Burrito"
 - **Reason:** owner's decision; the dashboard is presented for the assessing company.
 - **Note:** the dataset's Brand value is "Burger Town" and the menu is burgers. The API is unchanged and its docs title still says "Burger Town".
 
-### 31. Next.js 15.5 rather than 16
+### 33. Next.js 15.5 rather than 16
 - **Reason:** stability and familiarity.
 - **Evidence:** none measured.
 
-### 32. Restrained visual design: one chart colour, IBM Plex Sans self-hosted
+### 34. Restrained theme: green data, red accent, sand bands; IBM Plex Sans self-hosted
 - **Reason:**
-  - colour never encodes outlet or group, so one hue avoids implying categories;
+  - colour never encodes outlet or group, so one hue (green) avoids implying categories;
+  - red is kept to a few accents (the rule above the KPIs, the selected question) and is not used for data, because red reads as "decline" in analytics;
+  - sand marks the filter bar and the insights panel; text is black on white;
   - the font is bundled with the app rather than loaded from a fonts CDN at build time.
-- **Evidence:** design judgment.
+- **Alternative:** red as the main data colour, or one colour per outlet or group.
+- **Why not:** red data would read as a decline, and per-category colours would imply differences the single-hue charts do not claim.
+- **Evidence:**
+  - contrast was calculated: green `#2F6B3C` is 6.38:1 and red `#B3261E` is 6.54:1 on white; control borders `#8F8268` are 3.78:1 on white and 3.22:1 on sand; the orders-line tint `#5A9366` is 3.62:1;
+  - the lightest green tint (inline bars, third donut slice) is below 3:1 and is always shown next to numbers;
+  - browser checks confirm the applied colours (red KPI rule, sand band, green bars) and that the stylesheet has no gradients.
+- **Note:** the palette is an interpretation of red, green, sand, white and black, not official brand values.
 
 ## Testing
 
-### 33. Check results against the source file, not against the database
+### 35. Check results against the source file, not against the database
 - **Reason:** the database must not validate itself.
 - **Alternative:** compare API output with SQL.
 - **Why not:** a shared bug would pass.
 - **Evidence:**
   - backend tests recompute expected values with pandas from the Excel file (39 tests);
   - deliberately breaking AOV, the end-date boundary and the group filter produced 8, 7 and 6 failures;
-  - browser checks compare displayed KPIs with the API (54 checks). They are written in Python Playwright, the browser tooling available in this environment.
+  - browser checks compare displayed KPIs with the API, and recompute each Ask About Your Data answer in Python from the raw API response (86 checks). They are written in Python Playwright, the browser tooling available in this environment.
 
 ---
 

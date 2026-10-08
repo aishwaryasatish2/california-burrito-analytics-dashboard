@@ -2,12 +2,12 @@
 // (outlet, group), only emphasis. Kept in JS because SVG presentation
 // attributes cannot read CSS variables.
 export const COLORS = {
-  data: "#2B5C8A",
-  dataMid: "#6E93B8",
-  dataLight: "#A9C1D9",
-  ink: "#1D2733",
-  muted: "#5E6A78",
-  grid: "#E6E9ED",
+  data: "#2F6B3C",
+  dataMid: "#5A9366",
+  dataLight: "#B9D4BE",
+  ink: "#1A1A1A",
+  muted: "#5B5346",
+  grid: "#E8DFCB",
   background: "#FFFFFF",
 };
 
